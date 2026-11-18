@@ -8,11 +8,11 @@
 //     (or 2% over the last 240) AND this bar closed up from the previous
 //     close (the washout is turning) AND the fall is fresh — the dip
 //     condition only became true within the last 60 bars, so the bot never
-//     buys into a slide that has been grinding down for hours. Buy with all
-//     cash.
+//     buys into a slide that has been grinding down for hours. Buy with 60%
+//     of cash (Grok review 19 Nov 2026: all-in makes one SL cost ~1.3%).
 //   * TREND entry (activity insurance for a strong up-day, when no dip ever
 //     comes): the 60-bar return is above +1.2% and the close is above its
-//     120-bar EMA. Buy with all cash.
+//     120-bar EMA. Buy with 60% of cash.
 //   * DIP exit: +2% take-profit, -1% stop-loss, or -1.5% trailing stop from
 //     the highest close since entry, or a time stop 480 bars (8 hours) after
 //     entry so a stale position never rides into the final hours.
@@ -27,7 +27,8 @@
 // its two graded runs always agree.
 //
 // Backtest on the published dev window (17-18 Nov 2026, BTC -2.8% over the
-// day): net PnL +$16.65 on $1,000, 1 round trip, max drawdown 0.7%.
+// day): net PnL +$9.99 on $1,000, 1 round trip, max drawdown 0.4% (60%
+// sizing; all-in was +$16.65, DD 0.7%). Grok review 19 Nov 2026.
 // Every shipped baseline loses money on that window (buy-and-hold -$31.63,
 // momentum -$23.87, ema-cross -$148.17, rsi-bollinger -$39.92,
 // adx-momentum -$75.57, hold-cash $0.00), so this bot passes the dev gate
@@ -37,6 +38,7 @@ import { runBars, type BarsState, type OrderInput } from './vendor/makefun-bars.
 
 const SYMBOL = 'CBBTC';
 const MAX_SLIPPAGE_BPS = 100;
+const SIZE_PCT = 60; // Grok review 19 Nov 2026: jangan all-in — 1 SL full-size ~1,3% equity. Pakai 60% untuk potong variance.
 
 // Dip entry: 120-bar fall of 1.5%+ or 240-bar fall of 2%+, with an up close.
 const DIP_SHORT_BARS = 120;
@@ -168,7 +170,8 @@ await runBars({
     }
 
     if (!dip && !trend) return [];
-    const notional = state.cash < state.weightRoom(SYMBOL) ? state.cash : state.weightRoom(SYMBOL);
+    const full = state.cash < state.weightRoom(SYMBOL) ? state.cash : state.weightRoom(SYMBOL);
+    const notional = (full * BigInt(SIZE_PCT)) / 100n;
     if (notional <= 0n || notional < BigInt(state.hello.fees.min_notional_quote_units)) return [];
     entryClose = Number(close);
     peakClose = Number(close);
