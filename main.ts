@@ -6,13 +6,18 @@
 //
 //   * DIP entry: the close has fallen at least 1.5% over the last 120 bars
 //     (or 2% over the last 240) AND this bar closed up from the previous
-//     close (the washout is turning). Buy with all cash.
+//     close (the washout is turning) AND the fall is fresh — the dip
+//     condition only became true within the last 60 bars, so the bot never
+//     buys into a slide that has been grinding down for hours. Buy with all
+//     cash.
 //   * TREND entry (activity insurance for a strong up-day, when no dip ever
 //     comes): the 60-bar return is above +1.2% and the close is above its
 //     120-bar EMA. Buy with all cash.
 //   * DIP exit: +2% take-profit, -1% stop-loss, or -1.5% trailing stop from
-//     the highest close since entry.
-//   * TREND exit: +1.5% take-profit, -1% stop-loss, or -1% trailing stop.
+//     the highest close since entry, or a time stop 480 bars (8 hours) after
+//     entry so a stale position never rides into the final hours.
+//   * TREND exit: +1.5% take-profit, -1% stop-loss, -1% trailing stop, or
+//     the same 480-bar time stop.
 //   * Never trades in the first 15 bars; flattens by bar 1425 (15 bars
 //     before the window ends) so nothing is left to the forced final sale.
 //
@@ -42,6 +47,10 @@ const DIP_LONG_BPS = 200;
 const TREND_BARS = 60;
 const TREND_BPS = 120;
 const EMA_BARS = 120;
+// A dip is only fresh for this many bars after its condition first turns true.
+const DIP_FRESH_BARS = 60;
+// A position still open after this many bars is closed, whatever its PnL.
+const TIME_STOP_BARS = 480;
 // Exits, in bps from the entry close (dip / trend).
 const DIP_TP_BPS = 200;
 const DIP_SL_BPS = 100;
@@ -62,7 +71,11 @@ let emaSeeded = false;
 /** Entry bookkeeping for the open position (decision-bar closes). */
 let entryClose = 0;
 let peakClose = 0;
+let entrySeq = 0;
 let mode: 'dip' | 'trend' | null = null;
+/** First seq at which each dip condition turned true (null while false). */
+let dipShortSince: number | null = null;
+let dipLongSince: number | null = null;
 
 function closeAt(seq: number): bigint | null {
   if (seq < 0 || seq >= closes.length) return null;
@@ -95,6 +108,20 @@ await runBars({
       }
     }
 
+    // Track when each dip condition first turned true (freshness filter).
+    const dipShort = retBps(close, closeAt(seq - DIP_SHORT_BARS));
+    const dipLong = retBps(close, closeAt(seq - DIP_LONG_BARS));
+    if (dipShort !== null && dipShort <= -DIP_SHORT_BPS) {
+      if (dipShortSince === null) dipShortSince = seq;
+    } else {
+      dipShortSince = null;
+    }
+    if (dipLong !== null && dipLong <= -DIP_LONG_BPS) {
+      if (dipLongSince === null) dipLongSince = seq;
+    } else {
+      dipLongSince = null;
+    }
+
     const firstTrade = state.warmupBars + SKIP_BARS;
     const flattenAt = state.warmupBars + WINDOW_BARS - FLATTEN_BEFORE_END;
 
@@ -116,7 +143,8 @@ await runBars({
       const trail = mode === 'dip' ? DIP_TRAIL_BPS : TREND_TRAIL_BPS;
       const gainBps = (Number(close) / entryClose - 1) * 10000;
       const offPeakBps = (Number(close) / peakClose - 1) * 10000;
-      const exit = gainBps >= tp || gainBps <= -sl || offPeakBps <= -trail;
+      const exit =
+        gainBps >= tp || gainBps <= -sl || offPeakBps <= -trail || seq - entrySeq >= TIME_STOP_BARS;
       if (!exit) return [];
       const qty = state.positions.get(SYMBOL)!.qty;
       mode = null;
@@ -126,12 +154,12 @@ await runBars({
     // Flat: look for an entry.
     const prev = closeAt(seq - 1);
     const upturn = prev !== null && close > prev;
-    const dipShort = retBps(close, closeAt(seq - DIP_SHORT_BARS));
-    const dipLong = retBps(close, closeAt(seq - DIP_LONG_BARS));
+    const freshShort = dipShortSince !== null && seq - dipShortSince <= DIP_FRESH_BARS;
+    const freshLong = dipLongSince !== null && seq - dipLongSince <= DIP_FRESH_BARS;
     const dip =
       upturn &&
-      ((dipShort !== null && dipShort <= -DIP_SHORT_BPS) ||
-        (dipLong !== null && dipLong <= -DIP_LONG_BPS));
+      ((dipShort !== null && dipShort <= -DIP_SHORT_BPS && freshShort) ||
+        (dipLong !== null && dipLong <= -DIP_LONG_BPS && freshLong));
 
     let trend = false;
     if (!dip) {
@@ -144,6 +172,7 @@ await runBars({
     if (notional <= 0n || notional < BigInt(state.hello.fees.min_notional_quote_units)) return [];
     entryClose = Number(close);
     peakClose = Number(close);
+    entrySeq = seq;
     mode = dip ? 'dip' : 'trend';
     const orders: OrderInput[] = [
       { side: 'buy', symbol: SYMBOL, notional_quote_units: notional, max_slippage_bps: MAX_SLIPPAGE_BPS },

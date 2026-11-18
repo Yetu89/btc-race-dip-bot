@@ -10,13 +10,15 @@ only, starting from $1,000 of paper money.
 
 - **Dip entry:** the close has fallen at least 1.5% over the last 120 bars
   (or 2% over the last 240) and this bar closed up from the previous close
-  — the washout is turning. Buy with all cash.
+  — the washout is turning — and the fall is fresh (the dip condition only
+  became true within the last 60 bars). Buy with all cash.
 - **Trend entry:** the 60-bar return is above +1.2% and the close is above
   its 120-bar EMA (activity insurance for a strong up-day when no dip ever
   comes). Buy with all cash.
 - **Dip exit:** +2% take-profit, -1% stop-loss, -1.5% trailing stop from the
-  highest close since entry.
-- **Trend exit:** +1.5% take-profit, -1% stop-loss, -1% trailing stop.
+  highest close since entry, or a 480-bar (8-hour) time stop.
+- **Trend exit:** +1.5% take-profit, -1% stop-loss, -1% trailing stop, or
+  the same 480-bar time stop.
 - Never trades in the first 15 bars; flattens 15 bars before the window
   ends. A full-size round trip costs ~26 bps (4 bps fee + 2 bps slippage +
   ~7 bps impact per side), so every exit target is far above that.
